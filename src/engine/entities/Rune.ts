@@ -48,7 +48,7 @@ export const createRune = (
 
   container.addChild(outerGlow, outer, inner, pattern, symbol);
 
-  container.interactive = true;
+  container.eventMode = 'static';
   container.cursor = 'pointer';
 
   container.on('pointerover', () => {

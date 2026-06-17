@@ -142,7 +142,7 @@ export const createStone = (
   container.addChild(body, texture, weightLabel);
 
   if (stone.placedSide === null) {
-    container.interactive = true;
+    container.eventMode = 'static';
     container.cursor = 'pointer';
 
     container.on('pointerover', () => {

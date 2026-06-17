@@ -73,14 +73,14 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
     gearState.slots.forEach((slot) => {
       const placedGear = gearState.placedGears.find((g) => g.id === slot.id);
       const slotSprite = createSlot(slot.x, slot.y, slot.allowedRadii, gearState.selectedSlot === slot.id);
-      slotSprite.interactive = true;
+      slotSprite.eventMode = 'static';
       slotSprite.cursor = 'pointer';
       slotSprite.on('pointerdown', () => handleSlotClick(slot.id));
       stage.addChild(slotSprite);
 
       if (placedGear) {
         const gearSprite = createGear(placedGear.radius, placedGear.teeth, slot.x, slot.y);
-        gearSprite.interactive = true;
+        gearSprite.eventMode = 'static';
         gearSprite.cursor = 'pointer';
         gearSprite.on('pointerdown', () => handleRemoveGear(slot.id));
         placedGearsRef.current.set(slot.id, { sprite: gearSprite, data: placedGear });
@@ -675,7 +675,7 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
     label.anchor.set(0.5);
 
     container.addChild(bg, label);
-    container.interactive = true;
+    container.eventMode = 'static';
     container.cursor = 'pointer';
 
     container.on('pointerover', () => {
@@ -716,7 +716,7 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
     label.anchor.set(0.5);
 
     container.addChild(bg, label);
-    container.interactive = true;
+    container.eventMode = 'static';
     container.cursor = 'pointer';
 
     container.on('pointerdown', onClick);
@@ -743,7 +743,7 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
     label.anchor.set(0.5);
 
     container.addChild(bg, label);
-    container.interactive = true;
+    container.eventMode = 'static';
     container.cursor = 'pointer';
 
     container.on('pointerover', () => {

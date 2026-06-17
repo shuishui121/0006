@@ -43,7 +43,7 @@ export const createMirror = (
 
   container.addChild(frame, glassGradient, highlight, base, indicator);
 
-  container.interactive = true;
+  container.eventMode = 'static';
   container.cursor = 'pointer';
 
   container.on('pointerover', () => {

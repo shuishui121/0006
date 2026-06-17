@@ -146,10 +146,10 @@ export class PixiGame {
       cancelAnimationFrame(this.animationFrame);
     }
     this.app.ticker.remove(this.handleTick.bind(this));
-    this.app.destroy(true);
-    if (this.container && this.app.view.parentNode) {
+    if (this.container && this.app.view && this.app.view.parentNode) {
       this.container.removeChild(this.app.view as HTMLCanvasElement);
     }
+    this.app.destroy(true, { children: true, texture: true, baseTexture: true });
   }
 
   public toLocalPoint(clientX: number, clientY: number): PIXI.Point {

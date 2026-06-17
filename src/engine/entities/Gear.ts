@@ -206,7 +206,7 @@ export const createGearSelector = (
     gearSprite.x = xOffset;
     gearSprite.y = 0;
     gearSprite.scale.set(0.5);
-    gearSprite.interactive = true;
+    gearSprite.eventMode = 'static';
     gearSprite.cursor = 'pointer';
 
     gearSprite.on('pointerover', () => {
