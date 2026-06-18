@@ -144,6 +144,7 @@ export const createStone = (
   if (stone.placedSide === null) {
     container.eventMode = 'static';
     container.cursor = 'pointer';
+    container.hitArea = new PIXI.Rectangle(-size / 2 - 3, -size / 2 - 3, size + 6, size + 6);
 
     container.on('pointerover', () => {
       container.scale.set(1.1);

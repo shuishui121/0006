@@ -66,6 +66,7 @@ export interface GearState {
   availableGears: { radius: number; teeth: number }[];
   powerConnected: boolean;
   selectedSlot: string | null;
+  selectedGearIndex: number | null;
 }
 
 export interface RuneState {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { PixiGame } from '@/engine/PixiGame';
 import { useGameStore } from '@/store/useGameStore';
-import { CANVAS_WIDTH, CANVAS_HEIGHT, RUNE_SYMBOLS, ROOM_ORDER } from '@/utils/constants';
+import { CANVAS_WIDTH, CANVAS_HEIGHT, RUNE_SYMBOLS, ROOM_ORDER, COLORS } from '@/utils/constants';
 import { checkGearConnection, checkRuneSequence, calculateLaserPath, checkLaserHitsTarget, checkBalance } from '@/engine/systems/PuzzleSystem';
 import { createGear, createPowerSource, createPowerTarget, createSlot, createGearSelector } from '@/engine/entities/Gear';
 import { createRune, createRuneBoard, createSequenceDisplay } from '@/engine/entities/Rune';
@@ -20,9 +20,10 @@ interface GameCanvasProps {
 export function GameCanvas({ width, height }: GameCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<PixiGame | null>(null);
-  const selectedGearIndexRef = useRef<number | null>(null);
   const placedGearsRef = useRef<Map<string, { sprite: PIXI.Container; data: PlacedGear }>>(new Map());
   const lockInputRef = useRef<string>('');
+  const renderedRef = useRef(false);
+  const selectedGearIndexRef = useRef<number | null>(null);
 
   const {
     currentRoom,
@@ -39,8 +40,10 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
     if (!gameRef.current) return;
     const game = gameRef.current;
     game.clearChildren();
+    placedGearsRef.current.clear();
 
-    const roomType = ROOM_ORDER[currentRoom];
+    const state = useGameStore.getState();
+    const roomType = ROOM_ORDER[state.currentRoom];
 
     switch (roomType) {
       case 'gear':
@@ -59,20 +62,22 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
         renderLockRoom(game);
         break;
     }
-  }, [currentRoom, gearState, runeState, mirrorState, balanceState, lockState]);
+  }, []);
 
   const renderGearRoom = (game: PixiGame) => {
+    const state = useGameStore.getState();
+    const gState = state.gearState;
     const stage = game.getStage();
 
-    const powerSource = createPowerSource(gearState.powerSource.x, gearState.powerSource.y);
+    const powerSource = createPowerSource(gState.powerSource.x, gState.powerSource.y);
     stage.addChild(powerSource);
 
-    const powerTarget = createPowerTarget(gearState.powerTarget.x, gearState.powerTarget.y, 50, gearState.powerConnected);
+    const powerTarget = createPowerTarget(gState.powerTarget.x, gState.powerTarget.y, 50, gState.powerConnected);
     stage.addChild(powerTarget);
 
-    gearState.slots.forEach((slot) => {
-      const placedGear = gearState.placedGears.find((g) => g.id === slot.id);
-      const slotSprite = createSlot(slot.x, slot.y, slot.allowedRadii, gearState.selectedSlot === slot.id);
+    gState.slots.forEach((slot) => {
+      const placedGear = gState.placedGears.find((g) => g.id === slot.id);
+      const slotSprite = createSlot(slot.x, slot.y, slot.allowedRadii, gState.selectedSlot === slot.id);
       slotSprite.eventMode = 'static';
       slotSprite.cursor = 'pointer';
       slotSprite.on('pointerdown', () => handleSlotClick(slot.id));
@@ -82,24 +87,37 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
         const gearSprite = createGear(placedGear.radius, placedGear.teeth, slot.x, slot.y);
         gearSprite.eventMode = 'static';
         gearSprite.cursor = 'pointer';
-        gearSprite.on('pointerdown', () => handleRemoveGear(slot.id));
+        gearSprite.on('pointerdown', (e: any) => {
+          if (e.stopPropagation) e.stopPropagation();
+          handleRemoveGear(slot.id);
+        });
         placedGearsRef.current.set(slot.id, { sprite: gearSprite, data: placedGear });
         stage.addChild(gearSprite);
       }
     });
 
-    const gearSelector = createGearSelector(gearState.availableGears, handleGearSelect);
+    const gearSelector = createGearSelector(gState.availableGears, selectedGearIndexRef.current, handleGearSelect);
     stage.addChild(gearSelector);
 
-    const instruction = new PIXI.Text('选择齿轮后点击槽位放置，点击已放置的齿轮可移除', {
-      fontSize: 16,
-      fill: '#d4c4a8',
-      align: 'center',
-    });
-    instruction.anchor.set(0.5);
-    instruction.x = CANVAS_WIDTH / 2;
-    instruction.y = 620;
-    stage.addChild(instruction);
+    if (selectedGearIndexRef.current !== null && gState.availableGears[selectedGearIndexRef.current]) {
+      const hint = new PIXI.Text(
+        `已选中齿轮：${gState.availableGears[selectedGearIndexRef.current].radius}，点击上方虚线圆圈槽位放置`,
+        { fontSize: 16, fill: COLORS.GOLD_LIGHT, align: 'center' }
+      );
+      hint.anchor.set(0.5);
+      hint.x = CANVAS_WIDTH / 2;
+      hint.y = 620;
+      stage.addChild(hint);
+    } else {
+      const instruction = new PIXI.Text(
+        '① 点击下方齿轮选中 → ② 点击上方虚线圆圈槽位放置 → ③ 点击检查连接',
+        { fontSize: 16, fill: '#d4c4a8', align: 'center' }
+      );
+      instruction.anchor.set(0.5);
+      instruction.x = CANVAS_WIDTH / 2;
+      instruction.y = 620;
+      stage.addChild(instruction);
+    }
 
     const checkBtn = createButton('检查连接', CANVAS_WIDTH - 150, 680, checkGearPuzzle);
     stage.addChild(checkBtn);
@@ -109,18 +127,22 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
   };
 
   const handleGearSelect = (index: number) => {
-    selectedGearIndexRef.current = index;
+    selectedGearIndexRef.current = selectedGearIndexRef.current === index ? null : index;
+    renderRoom();
   };
 
   const handleSlotClick = (slotId: string) => {
     if (selectedGearIndexRef.current === null) return;
 
-    const slot = gearState.slots.find((s) => s.id === slotId);
-    const gear = gearState.availableGears[selectedGearIndexRef.current];
+    const state = useGameStore.getState();
+    const gState = state.gearState;
+
+    const slot = gState.slots.find((s) => s.id === slotId);
+    const gear = gState.availableGears[selectedGearIndexRef.current];
 
     if (!slot || !gear) return;
     if (!slot.allowedRadii.includes(gear.radius)) return;
-    if (gearState.placedGears.find((g) => g.id === slotId)) return;
+    if (gState.placedGears.find((g) => g.id === slotId)) return;
 
     const newGear: PlacedGear = {
       id: slotId,
@@ -131,8 +153,8 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
       rotation: 0,
     };
 
-    const newPlacedGears = [...gearState.placedGears, newGear];
-    const newAvailableGears = gearState.availableGears.filter((_, i) => i !== selectedGearIndexRef.current);
+    const newPlacedGears = [...gState.placedGears, newGear];
+    const newAvailableGears = gState.availableGears.filter((_, i) => i !== selectedGearIndexRef.current);
 
     setGearState({
       placedGears: newPlacedGears,
@@ -140,40 +162,42 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
     });
 
     selectedGearIndexRef.current = null;
-    renderRoom();
+    setTimeout(() => renderRoom(), 0);
   };
 
   const handleRemoveGear = (slotId: string) => {
-    const placedGear = gearState.placedGears.find((g) => g.id === slotId);
+    const state = useGameStore.getState();
+    const gState = state.gearState;
+    const placedGear = gState.placedGears.find((g) => g.id === slotId);
     if (!placedGear) return;
 
-    const newPlacedGears = gearState.placedGears.filter((g) => g.id !== slotId);
-    const newAvailableGears = [...gearState.availableGears, { radius: placedGear.radius, teeth: placedGear.teeth }];
+    const newPlacedGears = gState.placedGears.filter((g) => g.id !== slotId);
+    const newAvailableGears = [...gState.availableGears, { radius: placedGear.radius, teeth: placedGear.teeth }];
 
     setGearState({
       placedGears: newPlacedGears,
       availableGears: newAvailableGears,
     });
-    placedGearsRef.current.delete(slotId);
-    renderRoom();
+    setTimeout(() => renderRoom(), 0);
   };
 
   const checkGearPuzzle = () => {
+    const state = useGameStore.getState();
+    const gState = state.gearState;
     const connected = checkGearConnection(
-      gearState.powerSource,
-      gearState.powerTarget,
-      gearState.placedGears,
+      gState.powerSource,
+      gState.powerTarget,
+      gState.placedGears,
     );
 
     setGearState({ powerConnected: connected });
 
     if (connected) {
-      setGearState({ powerConnected: true });
       handleRoomComplete();
     } else {
       triggerDarken();
     }
-    renderRoom();
+    setTimeout(() => renderRoom(), 0);
   };
 
   const resetGearPuzzle = () => {
@@ -183,37 +207,40 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
       availableGears: [...config.availableGears],
       powerConnected: false,
       selectedSlot: null,
+      selectedGearIndex: null,
     });
-    placedGearsRef.current.clear();
-    renderRoom();
+    selectedGearIndexRef.current = null;
+    setTimeout(() => renderRoom(), 0);
   };
 
   const renderRuneRoom = (game: PixiGame) => {
+    const state = useGameStore.getState();
+    const rState = state.runeState;
     const stage = game.getStage();
 
     const board = createRuneBoard();
     stage.addChild(board);
 
-    runeState.runes.forEach((rune) => {
+    rState.runes.forEach((rune) => {
       const runeSprite = createRune(rune, handleRuneClick);
       stage.addChild(runeSprite);
     });
 
     const sequenceDisplay = createSequenceDisplay(
-      runeState.currentSequence,
-      runeState.correctSequence.length,
+      rState.currentSequence,
+      rState.correctSequence.length,
       RUNE_SYMBOLS,
     );
     stage.addChild(sequenceDisplay);
 
-    const instruction = new PIXI.Text('按照正确顺序点击符文点亮它们', {
+    const instruction = new PIXI.Text('按天干地支顺序：甲→乙→丙→丁→戊→己→庚→辛→壬→癸→子→丑', {
       fontSize: 16,
       fill: '#d4c4a8',
       align: 'center',
     });
     instruction.anchor.set(0.5);
     instruction.x = CANVAS_WIDTH / 2;
-    instruction.y = 60;
+    instruction.y = 40;
     stage.addChild(instruction);
 
     const resetBtn = createButton('重置', CANVAS_WIDTH - 120, 680, resetRunePuzzle);
@@ -221,29 +248,34 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
   };
 
   const handleRuneClick = (runeId: number) => {
-    if (runeState.runes[runeId].isLit) return;
+    const state = useGameStore.getState();
+    const rState = state.runeState;
 
-    const expectedId = runeState.correctSequence[runeState.currentSequence.length];
+    if (rState.runes[runeId].isLit) return;
+
+    const expectedId = rState.correctSequence[rState.currentSequence.length];
 
     if (runeId === expectedId) {
-      const newRunes = runeState.runes.map((r) =>
+      const newRunes = rState.runes.map((r) =>
         r.id === runeId ? { ...r, isLit: true } : r,
       );
-      const newSequence = [...runeState.currentSequence, runeId];
+      const newSequence = [...rState.currentSequence, runeId];
 
       setRuneState({
         runes: newRunes,
         currentSequence: newSequence,
       });
 
-      if (checkRuneSequence({ ...runeState, currentSequence: newSequence, runes: newRunes })) {
+      const nextState = { ...rState, currentSequence: newSequence, runes: newRunes };
+      if (checkRuneSequence(nextState)) {
         handleRoomComplete();
       }
     } else {
       triggerDarken();
       resetRunePuzzle();
+      return;
     }
-    renderRoom();
+    setTimeout(() => renderRoom(), 0);
   };
 
   const resetRunePuzzle = () => {
@@ -252,51 +284,53 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
       runes: config.runes.map((r: any) => ({ ...r, isLit: false })),
       currentSequence: [],
     });
-    renderRoom();
+    setTimeout(() => renderRoom(), 0);
   };
 
   const renderMirrorRoom = (game: PixiGame) => {
+    const state = useGameStore.getState();
+    const mState = state.mirrorState;
     const stage = game.getStage();
 
     const wall1 = createWall(450, 150, 30, 200);
     const wall2 = createWall(750, 350, 30, 200);
     stage.addChild(wall1, wall2);
 
-    const emitter = createLaserEmitter(mirrorState.laserSource.x, mirrorState.laserSource.y, mirrorState.laserAngle);
+    const emitter = createLaserEmitter(mState.laserSource.x, mState.laserSource.y, mState.laserAngle);
     stage.addChild(emitter);
 
-    const targetSprite = createTarget(mirrorState.target.x, mirrorState.target.y, mirrorState.targetRadius, mirrorState.targetHit);
+    const targetSprite = createTarget(mState.target.x, mState.target.y, mState.targetRadius, mState.targetHit);
     stage.addChild(targetSprite);
 
-    mirrorState.mirrors.forEach((mirror) => {
+    mState.mirrors.forEach((mirror) => {
       const mirrorSprite = createMirror(mirror, handleMirrorClick);
       stage.addChild(mirrorSprite);
     });
 
     const laserPath = calculateLaserPath(
-      mirrorState.laserSource,
-      mirrorState.laserAngle,
-      mirrorState.mirrors,
+      mState.laserSource,
+      mState.laserAngle,
+      mState.mirrors,
       { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
     );
     const laserGraphics = createLaserPath(laserPath);
     stage.addChild(laserGraphics);
 
-    const hitTarget = checkLaserHitsTarget(laserPath, mirrorState.target, mirrorState.targetRadius);
+    const hitTarget = checkLaserHitsTarget(laserPath, mState.target, mState.targetRadius);
     setMirrorState({ laserPath, targetHit: hitTarget });
 
-    if (hitTarget) {
-      setTimeout(() => handleRoomComplete(), 500);
+    if (hitTarget && !completedRooms[2]) {
+      setTimeout(() => handleRoomComplete(), 600);
     }
 
-    const instruction = new PIXI.Text('点击镜子旋转45度，让激光击中目标', {
+    const instruction = new PIXI.Text('点击镜子旋转45度（每次点击旋转），让激光绕过墙壁击中目标', {
       fontSize: 16,
       fill: '#d4c4a8',
       align: 'center',
     });
     instruction.anchor.set(0.5);
     instruction.x = CANVAS_WIDTH / 2;
-    instruction.y = 60;
+    instruction.y = 40;
     stage.addChild(instruction);
 
     const resetBtn = createButton('重置', CANVAS_WIDTH - 120, 680, resetMirrorPuzzle);
@@ -304,11 +338,13 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
   };
 
   const handleMirrorClick = (mirrorId: string) => {
-    const newMirrors = mirrorState.mirrors.map((m) =>
+    const state = useGameStore.getState();
+    const mState = state.mirrorState;
+    const newMirrors = mState.mirrors.map((m) =>
       m.id === mirrorId ? { ...m, angle: m.angle + Math.PI / 4 } : m,
     );
     setMirrorState({ mirrors: newMirrors });
-    renderRoom();
+    setTimeout(() => renderRoom(), 0);
   };
 
   const resetMirrorPuzzle = () => {
@@ -317,47 +353,49 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
       mirrors: config.mirrors.map((m: any) => ({ ...m })),
       targetHit: false,
     });
-    renderRoom();
+    setTimeout(() => renderRoom(), 0);
   };
 
   const renderBalanceRoom = (game: PixiGame) => {
+    const state = useGameStore.getState();
+    const bState = state.balanceState;
     const stage = game.getStage();
 
-    const tiltAngle = balanceState.leftTotal === balanceState.rightTotal
+    const tiltAngle = bState.leftTotal === bState.rightTotal
       ? 0
-      : (balanceState.leftTotal - balanceState.rightTotal) * 0.005;
+      : Math.max(-0.2, Math.min(0.2, (bState.leftTotal - bState.rightTotal) * 0.008));
 
     const balance = createBalance(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 50, tiltAngle);
     stage.addChild(balance);
 
-    const weightDisplay = createWeightDisplay(balanceState.leftTotal, balanceState.rightTotal, balanceState.targetWeight);
+    const weightDisplay = createWeightDisplay(bState.leftTotal, bState.rightTotal, bState.targetWeight);
     stage.addChild(weightDisplay);
 
     const stonesContainer = new PIXI.Container();
-    balanceState.availableStones.forEach((stone) => {
+    bState.availableStones.forEach((stone) => {
       if (stone.placedSide === null) {
-        const stoneSprite = createStone(stone, handleStoneSelect, balanceState.selectedStone === stone.id);
+        const stoneSprite = createStone(stone, handleStoneSelect, bState.selectedStone === stone.id);
         stonesContainer.addChild(stoneSprite);
       }
     });
     stage.addChild(stonesContainer);
 
-    const leftSlotBtns = balanceState.leftArmSlots.map((slot, idx) => {
+    const leftSlotBtns = bState.leftArmSlots.map((slot, idx) => {
       const btn = createSlotButton(slot.x, slot.y, () => handlePlaceStone('left', idx));
       return btn;
     });
-    const rightSlotBtns = balanceState.rightArmSlots.map((slot, idx) => {
+    const rightSlotBtns = bState.rightArmSlots.map((slot, idx) => {
       const btn = createSlotButton(slot.x, slot.y, () => handlePlaceStone('right', idx));
       return btn;
     });
     leftSlotBtns.forEach((b) => stage.addChild(b));
     rightSlotBtns.forEach((b) => stage.addChild(b));
 
-    const placedStonesLeft = balanceState.availableStones.filter((s) => s.placedSide === 'left');
-    const placedStonesRight = balanceState.availableStones.filter((s) => s.placedSide === 'right');
+    const placedStonesLeft = bState.availableStones.filter((s) => s.placedSide === 'left');
+    const placedStonesRight = bState.availableStones.filter((s) => s.placedSide === 'right');
 
     placedStonesLeft.forEach((stone, idx) => {
-      const slot = balanceState.leftArmSlots[idx];
+      const slot = bState.leftArmSlots[idx];
       if (slot) {
         const displayStone = { ...stone, x: slot.x, y: slot.y - 20 };
         const stoneSprite = createStone(displayStone, () => handleRemoveStone(stone.id), false);
@@ -367,7 +405,7 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
     });
 
     placedStonesRight.forEach((stone, idx) => {
-      const slot = balanceState.rightArmSlots[idx];
+      const slot = bState.rightArmSlots[idx];
       if (slot) {
         const displayStone = { ...stone, x: slot.x, y: slot.y - 20 };
         const stoneSprite = createStone(displayStone, () => handleRemoveStone(stone.id), false);
@@ -376,9 +414,12 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
       }
     });
 
-    const instruction = new PIXI.Text('选择石块后点击天平托盘放置，左右都需要等于目标重量', {
+    const instructionText = bState.selectedStone
+      ? `已选石块重量：${bState.availableStones.find(s=>s.id===bState.selectedStone)?.weight || 0}，点击天平 ± 圆圈放置`
+      : '① 点击下方石块选中 → ② 点击天平两侧圆圈放置 → ③ 左右均需等于目标重量';
+    const instruction = new PIXI.Text(instructionText, {
       fontSize: 16,
-      fill: '#d4c4a8',
+      fill: bState.selectedStone ? COLORS.GOLD_LIGHT : '#d4c4a8',
       align: 'center',
     });
     instruction.anchor.set(0.5);
@@ -394,20 +435,24 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
   };
 
   const handleStoneSelect = (stoneId: string) => {
-    setBalanceState({ selectedStone: stoneId });
-    renderRoom();
+    const state = useGameStore.getState();
+    const newSelected = state.balanceState.selectedStone === stoneId ? null : stoneId;
+    setBalanceState({ selectedStone: newSelected });
+    setTimeout(() => renderRoom(), 0);
   };
 
   const handlePlaceStone = (side: 'left' | 'right', slotIndex: number) => {
-    if (!balanceState.selectedStone) return;
+    const state = useGameStore.getState();
+    const bState = state.balanceState;
 
-    const slots = side === 'left' ? balanceState.leftArmSlots : balanceState.rightArmSlots;
+    if (!bState.selectedStone) return;
+    const slots = side === 'left' ? bState.leftArmSlots : bState.rightArmSlots;
     if (slots[slotIndex]?.filled) return;
 
-    const stone = balanceState.availableStones.find((s) => s.id === balanceState.selectedStone);
+    const stone = bState.availableStones.find((s) => s.id === bState.selectedStone);
     if (!stone) return;
 
-    const newStones = balanceState.availableStones.map((s) =>
+    const newStones = bState.availableStones.map((s) =>
       s.id === stone.id ? { ...s, placedSide: side } : s,
     );
 
@@ -417,7 +462,6 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
 
     const placedLeft = newStones.filter((s) => s.placedSide === 'left');
     const placedRight = newStones.filter((s) => s.placedSide === 'right');
-
     const leftTotal = placedLeft.reduce((sum, s) => sum + s.weight, 0);
     const rightTotal = placedRight.reduce((sum, s) => sum + s.weight, 0);
 
@@ -438,18 +482,20 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
         rightTotal,
       });
     }
-    renderRoom();
+    setTimeout(() => renderRoom(), 0);
   };
 
   const handleRemoveStone = (stoneId: string) => {
-    const stone = balanceState.availableStones.find((s) => s.id === stoneId);
+    const state = useGameStore.getState();
+    const bState = state.balanceState;
+    const stone = bState.availableStones.find((s) => s.id === stoneId);
     if (!stone || !stone.placedSide) return;
 
-    const newStones = balanceState.availableStones.map((s) =>
+    const newStones = bState.availableStones.map((s) =>
       s.id === stoneId ? { ...s, placedSide: null } : s,
     );
 
-    const slots = stone.placedSide === 'left' ? balanceState.leftArmSlots : balanceState.rightArmSlots;
+    const slots = stone.placedSide === 'left' ? bState.leftArmSlots : bState.rightArmSlots;
     const placedStones = newStones.filter((s) => s.placedSide === stone.placedSide);
 
     const newSlots = slots.map((s, i) =>
@@ -458,7 +504,6 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
 
     const placedLeft = newStones.filter((s) => s.placedSide === 'left');
     const placedRight = newStones.filter((s) => s.placedSide === 'right');
-
     const leftTotal = placedLeft.reduce((sum, s) => sum + s.weight, 0);
     const rightTotal = placedRight.reduce((sum, s) => sum + s.weight, 0);
 
@@ -477,11 +522,13 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
         rightTotal,
       });
     }
-    renderRoom();
+    setTimeout(() => renderRoom(), 0);
   };
 
   const checkBalancePuzzle = () => {
-    const isBalanced = checkBalance(balanceState);
+    const state = useGameStore.getState();
+    const bState = state.balanceState;
+    const isBalanced = checkBalance(bState);
     setBalanceState({ isBalanced });
 
     if (isBalanced) {
@@ -502,10 +549,12 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
       isBalanced: false,
       selectedStone: null,
     });
-    renderRoom();
+    setTimeout(() => renderRoom(), 0);
   };
 
   const renderLockRoom = (game: PixiGame) => {
+    const state = useGameStore.getState();
+    const lState = state.lockState;
     const stage = game.getStage();
 
     const cx = CANVAS_WIDTH / 2;
@@ -514,7 +563,7 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
     const lockBg = new PIXI.Graphics();
     lockBg.beginFill('#4a3728');
     lockBg.lineStyle(4, '#8b7355');
-    lockBg.drawRoundedRect(cx - 250, cy - 200, 500, 400, 15);
+    lockBg.drawRoundedRect(cx - 250, cy - 220, 500, 440, 15);
     lockBg.endFill();
     stage.addChild(lockBg);
 
@@ -525,60 +574,74 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
     });
     title.anchor.set(0.5);
     title.x = cx;
-    title.y = cy - 150;
+    title.y = cy - 175;
     stage.addChild(title);
 
-    const clueLabel = new PIXI.Text('收集的线索：', {
-      fontSize: 18,
+    const clueLabel = new PIXI.Text('收集的线索（每关对应一位数字）：', {
+      fontSize: 16,
       fill: '#d4c4a8',
     });
     clueLabel.x = cx - 200;
-    clueLabel.y = cy - 80;
+    clueLabel.y = cy - 120;
     stage.addChild(clueLabel);
 
-    lockState.clues.forEach((clue, i) => {
-      const clueBox = new PIXI.Graphics();
-      clueBox.beginFill('#2d4a3e');
-      clueBox.lineStyle(2, '#8b7355');
-      clueBox.drawRoundedRect(cx - 200 + i * 110, cy - 40, 90, 70, 5);
-      clueBox.endFill();
-
-      const clueText = new PIXI.Text(clue, {
-        fontSize: 36,
-        fill: '#e8c07d',
+    if (lState.clues.length === 0) {
+      const emptyHint = new PIXI.Text('（暂无线索，请先通关前四个房间）', {
+        fontSize: 14,
+        fill: '#8b7355',
         align: 'center',
       });
-      clueText.anchor.set(0.5);
-      clueText.x = cx - 200 + i * 110 + 45;
-      clueText.y = cy - 40 + 35;
+      emptyHint.anchor.set(0.5);
+      emptyHint.x = cx;
+      emptyHint.y = cy - 50;
+      stage.addChild(emptyHint);
+    } else {
+      lState.clues.forEach((clue, i) => {
+        const clueBox = new PIXI.Graphics();
+        clueBox.beginFill('#2d4a3e');
+        clueBox.lineStyle(2, '#8b7355');
+        clueBox.drawRoundedRect(cx - 200 + i * 110, cy - 90, 90, 70, 5);
+        clueBox.endFill();
 
-      stage.addChild(clueBox, clueText);
-    });
+        const clueText = new PIXI.Text(clue, {
+          fontSize: 36,
+          fill: '#e8c07d',
+          align: 'center',
+          fontWeight: 'bold',
+        });
+        clueText.anchor.set(0.5);
+        clueText.x = cx - 200 + i * 110 + 45;
+        clueText.y = cy - 90 + 35;
 
-    const inputLabel = new PIXI.Text('输入密码：', {
-      fontSize: 18,
+        stage.addChild(clueBox, clueText);
+      });
+    }
+
+    const inputLabel = new PIXI.Text('输入四位密码：', {
+      fontSize: 16,
       fill: '#d4c4a8',
     });
     inputLabel.x = cx - 200;
-    inputLabel.y = cy + 50;
+    inputLabel.y = cy + 20;
     stage.addChild(inputLabel);
 
     for (let i = 0; i < 4; i++) {
       const digitBox = new PIXI.Graphics();
       digitBox.beginFill('#1a1410');
       digitBox.lineStyle(2, '#cd7f32');
-      digitBox.drawRoundedRect(cx - 200 + i * 110, cy + 80, 90, 70, 5);
+      digitBox.drawRoundedRect(cx - 200 + i * 110, cy + 50, 90, 70, 5);
       digitBox.endFill();
 
-      const digit = lockState.input[i] || '';
+      const digit = lState.input[i] || '';
       const digitText = new PIXI.Text(digit, {
         fontSize: 48,
         fill: digit ? '#e8c07d' : '#666',
         align: 'center',
+        fontWeight: 'bold',
       });
       digitText.anchor.set(0.5);
       digitText.x = cx - 200 + i * 110 + 45;
-      digitText.y = cy + 80 + 35;
+      digitText.y = cy + 50 + 35;
 
       stage.addChild(digitBox, digitText);
     }
@@ -587,8 +650,8 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
       for (let col = 0; col < 3; col++) {
         const digit = row * 3 + col + 1;
         const btn = createKeypadButton(
-          cx - 150 + col * 100,
-          cy + 170 + row * 55,
+          cx - 170 + col * 95,
+          cy + 160 + row * 60,
           digit.toString(),
           () => handleLockInput(digit.toString()),
         );
@@ -596,15 +659,15 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
       }
     }
 
-    const zeroBtn = createKeypadButton(cx - 50, cy + 170 + 165, '0', () => handleLockInput('0'));
-    const clearBtn = createKeypadButton(cx + 50, cy + 170 + 165, '清除', () => handleLockClear());
-    const submitBtn = createKeypadButton(cx + 150, cy + 170, '确认', () => handleLockSubmit());
-    submitBtn.height = 105;
+    const zeroBtn = createKeypadButton(cx - 170, cy + 160 + 180, '0', () => handleLockInput('0'));
+    const clearBtn = createKeypadButton(cx - 170 + 95, cy + 160 + 180, '清除', () => handleLockClear());
+    const submitBtn = createKeypadButton(cx - 170 + 190, cy + 160 + 150, '确认', () => handleLockSubmit());
+    submitBtn.height = 90;
 
     stage.addChild(zeroBtn, clearBtn, submitBtn);
 
-    const instruction = new PIXI.Text('根据前四关收集的线索输入四位数密码', {
-      fontSize: 16,
+    const instruction = new PIXI.Text('根据前四关收集的线索，按顺序输入四个数字', {
+      fontSize: 15,
       fill: '#d4c4a8',
       align: 'center',
     });
@@ -615,45 +678,44 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
   };
 
   const handleLockInput = (digit: string) => {
-    if (lockState.input.length >= 4) return;
-    const newInput = lockState.input + digit;
+    const state = useGameStore.getState();
+    const lState = state.lockState;
+    if (lState.input.length >= 4) return;
+    const newInput = lState.input + digit;
     setLockState({ input: newInput });
     lockInputRef.current = newInput;
-    renderRoom();
+    setTimeout(() => renderRoom(), 0);
   };
 
   const handleLockClear = () => {
     setLockState({ input: '' });
     lockInputRef.current = '';
-    renderRoom();
+    setTimeout(() => renderRoom(), 0);
   };
 
   const handleLockSubmit = () => {
-    if (lockState.input.length !== 4) return;
+    const state = useGameStore.getState();
+    const lState = state.lockState;
+    if (lState.input.length !== 4) return;
 
-    if (lockState.input === lockState.correctCode) {
+    if (lState.input === lState.correctCode) {
       handleRoomComplete();
     } else {
       triggerDarken();
       setLockState({ input: '' });
       lockInputRef.current = '';
-      renderRoom();
+      setTimeout(() => renderRoom(), 0);
     }
   };
 
   const handleRoomComplete = () => {
-    if (completedRooms[currentRoom]) return;
+    const state = useGameStore.getState();
+    const roomIdx = state.currentRoom;
+    if (state.completedRooms[roomIdx]) return;
 
-    const clue = PUZZLE_CONFIGS[currentRoom].clue;
-    completeRoom(currentRoom, clue);
-
+    const clue = PUZZLE_CONFIGS[roomIdx].clue;
+    completeRoom(roomIdx, clue);
     setTransitioning(true);
-    setTimeout(() => {
-      setTransitioning(false);
-      if (currentRoom < 4) {
-        useGameStore.getState().setCurrentRoom(currentRoom + 1);
-      }
-    }, 1500);
   };
 
   const createButton = (text: string, x: number, y: number, onClick: () => void): PIXI.Container => {
@@ -669,14 +731,16 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
 
     const label = new PIXI.Text(text, {
       fontSize: 16,
-      fill: '#d4c4a8',
+      fill: '#f4e8d0',
       align: 'center',
+      fontWeight: 'bold',
     });
     label.anchor.set(0.5);
 
     container.addChild(bg, label);
     container.eventMode = 'static';
     container.cursor = 'pointer';
+    container.hitArea = new PIXI.Rectangle(-60, -20, 120, 40);
 
     container.on('pointerover', () => {
       bg.clear();
@@ -703,21 +767,23 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
     container.y = y;
 
     const bg = new PIXI.Graphics();
-    bg.beginFill('#8b7355', 0.3);
-    bg.lineStyle(2, '#cd7f32', 0.6);
-    bg.drawCircle(0, 0, 25);
+    bg.beginFill('#8b7355', 0.25);
+    bg.lineStyle(2, '#e8c07d', 0.8);
+    bg.drawCircle(0, 0, 26);
     bg.endFill();
 
     const label = new PIXI.Text('+', {
-      fontSize: 24,
+      fontSize: 26,
       fill: '#e8c07d',
       align: 'center',
+      fontWeight: 'bold',
     });
     label.anchor.set(0.5);
 
     container.addChild(bg, label);
     container.eventMode = 'static';
     container.cursor = 'pointer';
+    container.hitArea = new PIXI.Circle(0, 0, 28);
 
     container.on('pointerdown', onClick);
 
@@ -736,15 +802,17 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
     bg.endFill();
 
     const label = new PIXI.Text(text, {
-      fontSize: 20,
+      fontSize: text.length > 1 ? 16 : 20,
       fill: '#e8c07d',
       align: 'center',
+      fontWeight: 'bold',
     });
     label.anchor.set(0.5);
 
     container.addChild(bg, label);
     container.eventMode = 'static';
     container.cursor = 'pointer';
+    container.hitArea = new PIXI.Rectangle(-40, -20, 80, 40);
 
     container.on('pointerover', () => {
       bg.clear();
@@ -772,19 +840,24 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
     gameRef.current = game;
     game.resize(width, height);
 
-    game.setOnUpdate((delta) => {
-      placedGearsRef.current.forEach(({ sprite, data }) => {
-        if (gearState.powerConnected) {
+    game.setOnUpdate(() => {
+      const state = useGameStore.getState();
+      if (state.gearState.powerConnected) {
+        placedGearsRef.current.forEach(({ sprite, data }) => {
           const direction = data.id === 'slot1' || data.id === 'slot3' || data.id === 'slot5' ? 1 : -1;
           sprite.rotation += 0.02 * direction;
-        }
-      });
+        });
+      }
     });
 
-    renderRoom();
+    setTimeout(() => renderRoom(), 50);
 
     return () => {
-      game.destroy();
+      try {
+        game.destroy();
+      } catch (e) {
+        console.warn('Game destroy warning:', e);
+      }
     };
   }, []);
 
@@ -795,14 +868,20 @@ export function GameCanvas({ width, height }: GameCanvasProps) {
   }, [width, height]);
 
   useEffect(() => {
-    renderRoom();
-  }, [currentRoom]);
+    const timer = setTimeout(() => {
+      renderRoom();
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [currentRoom, renderRoom]);
 
   useEffect(() => {
-    if (gameRef.current && !isDarkened) {
-      renderRoom();
-    }
-  }, [isDarkened, gearState, runeState, mirrorState, balanceState, lockState]);
+    const timer = setTimeout(() => {
+      if (!useGameStore.getState().isDarkened) {
+        renderRoom();
+      }
+    }, 30);
+    return () => clearTimeout(timer);
+  }, [isDarkened, gearState, runeState, mirrorState, balanceState, lockState, renderRoom]);
 
   return (
     <div

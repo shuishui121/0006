@@ -50,6 +50,7 @@ export const createRune = (
 
   container.eventMode = 'static';
   container.cursor = 'pointer';
+  container.hitArea = new PIXI.Circle(0, 0, radius + 5);
 
   container.on('pointerover', () => {
     container.scale.set(1.1);

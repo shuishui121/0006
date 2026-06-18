@@ -72,6 +72,7 @@ export const createGear = (
   }
 
   container.addChild(graphics, center);
+  container.hitArea = new PIXI.Circle(0, 0, radius);
 
   return container;
 };
@@ -163,6 +164,7 @@ export const createSlot = (
   container.y = y;
 
   const maxRadius = Math.max(...allowedRadii);
+  const hitRadius = maxRadius + 15;
 
   const outer = new PIXI.Graphics();
   outer.lineStyle(2, selected ? COLORS.GOLD_LIGHT : COLORS.BRONZE, selected ? 0.8 : 0.4);
@@ -181,19 +183,26 @@ export const createSlot = (
   crosshair.moveTo(0, -maxRadius - 8);
   crosshair.lineTo(0, maxRadius + 8);
 
-  container.addChild(outer, inner, crosshair);
+  const hitArea = new PIXI.Graphics();
+  hitArea.beginFill(0xffffff, 0);
+  hitArea.drawCircle(0, 0, hitRadius);
+  hitArea.endFill();
+
+  container.addChild(outer, inner, crosshair, hitArea);
+  container.hitArea = new PIXI.Circle(0, 0, hitRadius);
   return container;
 };
 
 export const createGearSelector = (
   availableGears: { radius: number; teeth: number }[],
+  selectedIndex: number | null,
   onSelect: (index: number) => void,
 ): PIXI.Container => {
   const container = new PIXI.Container();
   container.x = 50;
   container.y = 680;
 
-  const label = new PIXI.Text('可用齿轮：', {
+  const label = new PIXI.Text('可用齿轮：(点击选中后，再点击上方槽位放置)', {
     fontSize: 16,
     fill: COLORS.PAPER,
   });
@@ -202,20 +211,39 @@ export const createGearSelector = (
 
   let xOffset = 0;
   availableGears.forEach((gear, index) => {
-    const gearSprite = createGear(gear.radius * 0.5, gear.teeth);
-    gearSprite.x = xOffset;
-    gearSprite.y = 0;
-    gearSprite.scale.set(0.5);
-    gearSprite.eventMode = 'static';
-    gearSprite.cursor = 'pointer';
+    const wrapper = new PIXI.Container();
+    wrapper.x = xOffset;
+    wrapper.y = 0;
 
-    gearSprite.on('pointerover', () => {
-      gearSprite.alpha = 0.8;
+    const actualRadius = gear.radius * 0.5;
+    const gearSprite = createGear(actualRadius, gear.teeth);
+    wrapper.addChild(gearSprite);
+
+    if (selectedIndex === index) {
+      const glow = new PIXI.Graphics();
+      glow.beginFill(COLORS.GOLD_LIGHT, 0.25);
+      glow.drawCircle(0, 0, actualRadius + 18);
+      glow.endFill();
+
+      const highlight = new PIXI.Graphics();
+      highlight.lineStyle(4, COLORS.GOLD_LIGHT, 1);
+      highlight.drawCircle(0, 0, actualRadius + 12);
+      highlight.endFill();
+      wrapper.addChildAt(glow, 0);
+      wrapper.addChildAt(highlight, 1);
+    }
+
+    wrapper.eventMode = 'static';
+    wrapper.cursor = 'pointer';
+    wrapper.hitArea = new PIXI.Circle(0, 0, actualRadius + 10);
+
+    wrapper.on('pointerover', () => {
+      wrapper.scale.set(1.1);
     });
-    gearSprite.on('pointerout', () => {
-      gearSprite.alpha = 1;
+    wrapper.on('pointerout', () => {
+      wrapper.scale.set(1);
     });
-    gearSprite.on('pointerdown', () => onSelect(index));
+    wrapper.on('pointerdown', () => onSelect(index));
 
     const sizeLabel = new PIXI.Text(`${gear.radius}`, {
       fontSize: 12,
@@ -224,10 +252,10 @@ export const createGearSelector = (
     });
     sizeLabel.anchor.set(0.5);
     sizeLabel.x = xOffset;
-    sizeLabel.y = gear.radius * 0.5 + 15;
+    sizeLabel.y = actualRadius + 18;
 
-    container.addChild(gearSprite, sizeLabel);
-    xOffset += gear.radius + 30;
+    container.addChild(wrapper, sizeLabel);
+    xOffset += gear.radius * 0.5 * 2 + 25;
   });
 
   return container;

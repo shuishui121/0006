@@ -40,6 +40,7 @@ const getInitialGearState = (): GearState => {
     availableGears: [...config.availableGears],
     powerConnected: false,
     selectedSlot: null,
+    selectedGearIndex: null,
   };
 };
 
@@ -224,3 +225,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setLockState: (state: Partial<LockState>) =>
     set((s) => ({ lockState: { ...s.lockState, ...state } })),
 }));
+
+// 开发调试：暴露到全局以便测试
+if (typeof window !== 'undefined') {
+  (window as any).__MOJIANG_STORE__ = useGameStore;
+}

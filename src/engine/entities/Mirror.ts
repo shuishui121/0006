@@ -45,6 +45,7 @@ export const createMirror = (
 
   container.eventMode = 'static';
   container.cursor = 'pointer';
+  container.hitArea = new PIXI.Rectangle(-halfLength - 8, -10, mirror.length + 16, 20);
 
   container.on('pointerover', () => {
     frame.lineStyle(3, COLORS.GOLD_LIGHT);
