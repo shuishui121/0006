@@ -1,16 +1,28 @@
-import { BookOpen, Play, Info } from 'lucide-react';
+import { BookOpen, Play, Info, Shuffle, Settings } from 'lucide-react';
 import { useState } from 'react';
 import { useGameStore } from '@/store/useGameStore';
 import { useNavigate } from 'react-router-dom';
+import { generateRandomSeed, DIFFICULTY_CONFIGS } from '@/utils/prng';
+import type { DifficultyLevel } from '@/utils/prng';
 
 export function MainMenu() {
   const [showInstructions, setShowInstructions] = useState(false);
-  const { startGame } = useGameStore();
+  const [showSettings, setShowSettings] = useState(false);
+  const [seedInput, setSeedInput] = useState('');
+  const [selectedDifficulty, setSelectedDifficulty] = useState<DifficultyLevel>('normal');
+  const { startGame, setSeed, setDifficulty } = useGameStore();
   const navigate = useNavigate();
 
   const handleStart = () => {
-    startGame();
+    const seed = seedInput.trim() || generateRandomSeed();
+    setSeed(seed);
+    setDifficulty(selectedDifficulty);
+    startGame(seed, selectedDifficulty);
     navigate('/game');
+  };
+
+  const handleRandomSeed = () => {
+    setSeedInput(generateRandomSeed());
   };
 
   return (
@@ -47,6 +59,14 @@ export function MainMenu() {
           >
             <Play size={28} />
             <span>开始探险</span>
+          </button>
+
+          <button
+            onClick={() => setShowSettings(true)}
+            className="flex items-center gap-3 px-8 py-4 bg-[#2a1f18] border-2 border-[#8b7355] rounded-xl text-[#d4c4a8] text-xl hover:bg-[#3d2f22] hover:border-[#e8c07d] transition-all"
+          >
+            <Settings size={24} />
+            <span>游戏设置</span>
           </button>
 
           <button
@@ -120,6 +140,79 @@ export function MainMenu() {
             >
               我知道了
             </button>
+          </div>
+        </div>
+      )}
+
+      {showSettings && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div className="bg-[#2a1f18] border-4 border-[#cd7f32] rounded-xl p-8 max-w-md w-full">
+            <h2 className="text-3xl text-[#e8c07d] font-bold mb-6 text-center">游戏设置</h2>
+
+            <div className="space-y-6">
+              <div>
+                <label className="block text-[#cd7f32] text-lg mb-3">难度选择</label>
+                <div className="grid grid-cols-3 gap-3">
+                  {(['easy', 'normal', 'hard'] as DifficultyLevel[]).map((level) => (
+                    <button
+                      key={level}
+                      onClick={() => setSelectedDifficulty(level)}
+                      className={`py-3 px-4 rounded-lg border-2 transition-all ${
+                        selectedDifficulty === level
+                          ? 'bg-[#cd7f32] border-[#e8c07d] text-white'
+                          : 'bg-[#1a1410] border-[#8b7355] text-[#d4c4a8] hover:border-[#cd7f32]'
+                      }`}
+                    >
+                      <div className="font-bold">{DIFFICULTY_CONFIGS[level].label}</div>
+                      <div className="text-xs mt-1 opacity-80">
+                        {level === 'easy' && '≤100种可能'}
+                        {level === 'normal' && '100-1000种'}
+                        {level === 'hard' && '>1000种'}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[#cd7f32] text-lg mb-3">随机种子</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={seedInput}
+                    onChange={(e) => setSeedInput(e.target.value.toUpperCase())}
+                    placeholder="输入种子或留空随机"
+                    className="flex-1 px-4 py-3 bg-[#1a1410] border-2 border-[#8b7355] rounded-lg text-[#d4c4a8] focus:border-[#e8c07d] focus:outline-none font-mono tracking-widest"
+                    maxLength={16}
+                  />
+                  <button
+                    onClick={handleRandomSeed}
+                    className="px-4 py-3 bg-[#2a1f18] border-2 border-[#8b7355] rounded-lg text-[#d4c4a8] hover:bg-[#3d2f22] hover:border-[#cd7f32] transition-all"
+                    title="随机种子"
+                  >
+                    <Shuffle size={20} />
+                  </button>
+                </div>
+                <p className="text-[#8b7355] text-sm mt-2">
+                  输入同一个种子每次生成完全一样的谜题，方便分享给朋友挑战
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-4 mt-8">
+              <button
+                onClick={() => setShowSettings(false)}
+                className="flex-1 py-3 bg-[#2a1f18] border-2 border-[#8b7355] rounded-lg text-[#d4c4a8] text-lg hover:bg-[#3d2f22] hover:border-[#cd7f32] transition-all"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="flex-1 py-3 bg-[#8b7355] border-2 border-[#cd7f32] rounded-lg text-[#d4c4a8] text-lg hover:bg-[#a08060] hover:border-[#e8c07d] transition-all"
+              >
+                确定
+              </button>
+            </div>
           </div>
         </div>
       )}

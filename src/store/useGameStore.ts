@@ -2,6 +2,10 @@ import { create } from 'zustand';
 import type { GameState, GearState, RuneState, MirrorState, BalanceState, LockState } from '@/types/game';
 import { INITIAL_TOKENS, DARKEN_PUNISHMENT_TIME, ROOM_ORDER } from '@/utils/constants';
 import { PUZZLE_CONFIGS } from '@/data/puzzles';
+import { generateAllPuzzles } from '@/puzzle/puzzleGenerator';
+import { generateRandomSeed } from '@/utils/prng';
+import type { DifficultyLevel } from '@/utils/prng';
+import type { GeneratedPuzzle } from '@/puzzle/puzzleGenerator';
 
 interface GameStore extends GameState {
   gearState: GearState;
@@ -10,8 +14,11 @@ interface GameStore extends GameState {
   balanceState: BalanceState;
   lockState: LockState;
   hintLevels: number[];
+  currentSeed: string;
+  currentDifficulty: DifficultyLevel;
+  generatedPuzzles: GeneratedPuzzle[];
   setCurrentRoom: (room: number) => void;
-  startGame: () => void;
+  startGame: (seed?: string, difficulty?: DifficultyLevel) => void;
   updateElapsedTime: () => void;
   consumeToken: () => boolean;
   addTokens: (amount: number) => void;
@@ -23,6 +30,8 @@ interface GameStore extends GameState {
   incrementHintLevel: (roomIndex: number) => number;
   setTransitioning: (value: boolean) => void;
   resetGame: () => void;
+  setSeed: (seed: string) => void;
+  setDifficulty: (difficulty: DifficultyLevel) => void;
   setGearState: (state: Partial<GearState>) => void;
   setRuneState: (state: Partial<RuneState>) => void;
   setMirrorState: (state: Partial<MirrorState>) => void;
@@ -30,8 +39,8 @@ interface GameStore extends GameState {
   setLockState: (state: Partial<LockState>) => void;
 }
 
-const getInitialGearState = (): GearState => {
-  const config = PUZZLE_CONFIGS[0].data;
+const getInitialGearState = (puzzleData?: any): GearState => {
+  const config = puzzleData || PUZZLE_CONFIGS[0].data;
   return {
     powerSource: config.powerSource,
     powerTarget: config.powerTarget,
@@ -44,8 +53,8 @@ const getInitialGearState = (): GearState => {
   };
 };
 
-const getInitialRuneState = (): RuneState => {
-  const config = PUZZLE_CONFIGS[1].data;
+const getInitialRuneState = (puzzleData?: any): RuneState => {
+  const config = puzzleData || PUZZLE_CONFIGS[1].data;
   return {
     runes: config.runes.map((r: any) => ({ ...r, isLit: false })),
     correctSequence: [...config.correctSequence],
@@ -54,8 +63,8 @@ const getInitialRuneState = (): RuneState => {
   };
 };
 
-const getInitialMirrorState = (): MirrorState => {
-  const config = PUZZLE_CONFIGS[2].data;
+const getInitialMirrorState = (puzzleData?: any): MirrorState => {
+  const config = puzzleData || PUZZLE_CONFIGS[2].data;
   return {
     mirrors: config.mirrors.map((m: any) => ({ ...m })),
     laserSource: config.laserSource,
@@ -67,8 +76,8 @@ const getInitialMirrorState = (): MirrorState => {
   };
 };
 
-const getInitialBalanceState = (): BalanceState => {
-  const config = PUZZLE_CONFIGS[3].data;
+const getInitialBalanceState = (puzzleData?: any): BalanceState => {
+  const config = puzzleData || PUZZLE_CONFIGS[3].data;
   return {
     availableStones: config.availableStones.map((s: any) => ({ ...s })),
     leftArmSlots: config.leftArmSlots.map((s: any) => ({ ...s })),
@@ -81,8 +90,8 @@ const getInitialBalanceState = (): BalanceState => {
   };
 };
 
-const getInitialLockState = (): LockState => {
-  const config = PUZZLE_CONFIGS[4].data;
+const getInitialLockState = (puzzleData?: any): LockState => {
+  const config = puzzleData || PUZZLE_CONFIGS[4].data;
   return {
     input: '',
     correctCode: config.correctCode,
@@ -105,6 +114,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
   currentHint: null,
   transitioning: false,
   hintLevels: [0, 0, 0, 0, 0],
+  currentSeed: '',
+  currentDifficulty: 'normal',
+  generatedPuzzles: [],
 
   gearState: getInitialGearState(),
   runeState: getInitialRuneState(),
@@ -114,21 +126,56 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   setCurrentRoom: (room: number) => set({ currentRoom: room }),
 
-  startGame: () =>
-    set({
-      startTime: Date.now(),
-      elapsedTime: 0,
-      currentRoom: 0,
-      tokens: INITIAL_TOKENS,
-      completedRooms: [false, false, false, false, false],
-      clues: [],
-      hintLevels: [0, 0, 0, 0, 0],
-      gearState: getInitialGearState(),
-      runeState: getInitialRuneState(),
-      mirrorState: getInitialMirrorState(),
-      balanceState: getInitialBalanceState(),
-      lockState: getInitialLockState(),
-    }),
+  setSeed: (seed: string) => set({ currentSeed: seed }),
+
+  setDifficulty: (difficulty: DifficultyLevel) => set({ currentDifficulty: difficulty }),
+
+  startGame: (seed?: string, difficulty?: DifficultyLevel) => {
+    const useSeed = seed || get().currentSeed || generateRandomSeed();
+    const useDifficulty = difficulty || get().currentDifficulty || 'normal';
+
+    try {
+      const result = generateAllPuzzles(useSeed, useDifficulty);
+      const puzzles = result.puzzles;
+
+      set({
+        currentSeed: useSeed,
+        currentDifficulty: useDifficulty,
+        generatedPuzzles: puzzles,
+        startTime: Date.now(),
+        elapsedTime: 0,
+        currentRoom: 0,
+        tokens: INITIAL_TOKENS,
+        completedRooms: [false, false, false, false, false],
+        clues: [],
+        hintLevels: [0, 0, 0, 0, 0],
+        gearState: getInitialGearState(puzzles[0].data),
+        runeState: getInitialRuneState(puzzles[1].data),
+        mirrorState: getInitialMirrorState(puzzles[2].data),
+        balanceState: getInitialBalanceState(puzzles[3].data),
+        lockState: getInitialLockState(puzzles[4].data),
+      });
+    } catch (error) {
+      console.error('Failed to generate puzzles:', error);
+      set({
+        currentSeed: useSeed,
+        currentDifficulty: useDifficulty,
+        generatedPuzzles: [],
+        startTime: Date.now(),
+        elapsedTime: 0,
+        currentRoom: 0,
+        tokens: INITIAL_TOKENS,
+        completedRooms: [false, false, false, false, false],
+        clues: [],
+        hintLevels: [0, 0, 0, 0, 0],
+        gearState: getInitialGearState(),
+        runeState: getInitialRuneState(),
+        mirrorState: getInitialMirrorState(),
+        balanceState: getInitialBalanceState(),
+        lockState: getInitialLockState(),
+      });
+    }
+  },
 
   updateElapsedTime: () => {
     const { startTime } = get();
@@ -188,27 +235,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   setTransitioning: (value: boolean) => set({ transitioning: value }),
 
-  resetGame: () =>
-    set({
-      currentRoom: 0,
-      tokens: INITIAL_TOKENS,
-      startTime: null,
-      elapsedTime: 0,
-      isPaused: false,
-      isDarkened: false,
-      darkenedTime: 0,
-      clues: [],
-      completedRooms: [false, false, false, false, false],
-      showHint: false,
-      currentHint: null,
-      transitioning: false,
-      hintLevels: [0, 0, 0, 0, 0],
-      gearState: getInitialGearState(),
-      runeState: getInitialRuneState(),
-      mirrorState: getInitialMirrorState(),
-      balanceState: getInitialBalanceState(),
-      lockState: getInitialLockState(),
-    }),
+  resetGame: () => {
+    const seed = get().currentSeed;
+    const difficulty = get().currentDifficulty;
+    get().startGame(seed, difficulty);
+  },
 
   setGearState: (state: Partial<GearState>) =>
     set((s) => ({ gearState: { ...s.gearState, ...state } })),
